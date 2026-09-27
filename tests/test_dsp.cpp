@@ -1,16 +1,22 @@
 #define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
 #include <doctest/doctest.h>
 
+#include <algorithm>
 #include <cmath>
+#include <memory>
 #include <numbers>
+#include <string>
 #include <vector>
 
 #include "audio/audio_buffer.h"
 #include "audio/audio_constants.h"
 #include "audio/beat_grid.h"
 #include "audio/crossfader.h"
+#include "audio/deck_processor.h"
 #include "audio/eq.h"
 #include "audio/filter.h"
+#include "audio/level_meter.h"
+#include "audio/metronome.h"
 #include "audio/routing.h"
 
 using namespace imdj;
@@ -241,4 +247,177 @@ TEST_CASE("Nearest beat shift lands on a shared beat when tempos differ")
             }
         }
     }
+}
+
+TEST_CASE("Equal power crossfade keeps the total power constant")
+{
+    for (float x = 0.0f; x <= 1.0f; x += 0.125f) {
+        const CrossfadeGains gains = CrossfadeGainsFor(CrossfaderCurve::EqualPower, x);
+        CHECK(gains.a * gains.a + gains.b * gains.b == doctest::Approx(1.0f).epsilon(0.001));
+    }
+
+    const CrossfadeGains linear = CrossfadeGainsFor(CrossfaderCurve::Linear, 0.3f);
+    CHECK(CrossfadeGainForSide(linear, CrossfaderSide::A) == doctest::Approx(0.7f));
+    CHECK(CrossfadeGainForSide(linear, CrossfaderSide::B) == doctest::Approx(0.3f));
+    CHECK(CrossfadeGainForSide(linear, CrossfaderSide::None) == doctest::Approx(1.0f));
+    CHECK(CrossfadeGainsFor(CrossfaderCurve::Linear, 2.0f).b == doctest::Approx(1.0f));
+}
+
+TEST_CASE("Flat EQ leaves the signal unchanged")
+{
+    StereoBuffer buffer = MakeBuffer(4800);
+    StereoBlock block = buffer.block(4800);
+    FillSine(block, 1000.0, 0.25f);
+    const std::vector<float> original(block.left.begin(), block.left.end());
+
+    ThreeBandEq eq;
+    eq.process(block, {}, SAMPLE_RATE);
+
+    float worst = 0.0f;
+    for (uint32_t i = 0; i < block.frames(); ++i) {
+        worst = std::max(worst, std::fabs(block.left[i] - original[i]));
+    }
+
+    CHECK(worst < 1e-4f);
+}
+
+TEST_CASE("EQ gains beyond the range are clamped")
+{
+    StereoBuffer buffer = MakeBuffer(4800);
+    StereoBlock block = buffer.block(4800);
+
+    ThreeBandEq maxEq;
+    FillSine(block, 60.0, 0.1f);
+    maxEq.process(block, {.low = ThreeBandEq::MAX_GAIN_DB}, SAMPLE_RATE);
+    const float atMax = Rms(block);
+
+    ThreeBandEq overEq;
+    FillSine(block, 60.0, 0.1f);
+    overEq.process(block, {.low = ThreeBandEq::MAX_GAIN_DB * 4.0f}, SAMPLE_RATE);
+    CHECK(Rms(block) == doctest::Approx(atMax).epsilon(0.001));
+}
+
+TEST_CASE("One knob filter cutoff follows the knob")
+{
+    CHECK_FALSE(OneKnobFilter::engaged(0.0f));
+    CHECK_FALSE(OneKnobFilter::engaged(OneKnobFilter::DEAD_ZONE));
+    CHECK(OneKnobFilter::engaged(-0.5f));
+    CHECK(OneKnobFilter::cutoffHz(-1.0f) == doctest::Approx(OneKnobFilter::LOW_PASS_MIN_HZ));
+    CHECK(OneKnobFilter::cutoffHz(1.0f) == doctest::Approx(OneKnobFilter::HIGH_PASS_MAX_HZ));
+    CHECK(OneKnobFilter::cutoffHz(-0.3f) > OneKnobFilter::cutoffHz(-0.6f));
+    CHECK(OneKnobFilter::cutoffHz(0.6f) > OneKnobFilter::cutoffHz(0.3f));
+}
+
+TEST_CASE("One knob filter switches cleanly from low pass to high pass")
+{
+    StereoBuffer buffer = MakeBuffer(4800);
+    StereoBlock block = buffer.block(4800);
+    OneKnobFilter filter;
+
+    FillSine(block, 6000.0, 0.5f);
+    const float before = Rms(block);
+    filter.process(block, -0.9f, SAMPLE_RATE);
+    CHECK(Rms(block) < before * 0.2f);
+
+    FillSine(block, 6000.0, 0.5f);
+    filter.process(block, 0.9f, SAMPLE_RATE);
+    CHECK(Rms(block) > before * 0.5f);
+}
+
+TEST_CASE("Gain steps ramp each channel on its own")
+{
+    StereoBuffer buffer = MakeBuffer(4);
+    StereoBlock block = buffer.block(4);
+    for (uint32_t i = 0; i < 4; ++i) {
+        block.left[i] = 1.0f;
+        block.right[i] = 1.0f;
+    }
+
+    block.scale(GainStep{1.0f, 0.0f}, GainStep{0.5f});
+    CHECK(block.left[0] == doctest::Approx(0.75f));
+    CHECK(block.left[3] == doctest::Approx(0.0f));
+    CHECK(block.right[0] == doctest::Approx(0.5f));
+    CHECK(block.right[3] == doctest::Approx(0.5f));
+
+    CHECK(GainStep{}.unity());
+    CHECK_FALSE(GainStep(1.0f, 0.5f).unity());
+    CHECK(GainStep(0.0f, 1.0f).delta(0) == doctest::Approx(0.0f));
+}
+
+TEST_CASE("Stereo meter rises with signal and decays in silence")
+{
+    StereoBuffer buffer = MakeBuffer(480);
+    StereoBlock block = buffer.block(480);
+    FillSine(block, 1000.0, 0.5f);
+
+    StereoMeter meter;
+    for (int i = 0; i < 50; ++i) {
+        meter.update(block, 0.01);
+    }
+
+    CHECK(meter.level(0) > 0.4f);
+    CHECK(meter.peakHold(1) == doctest::Approx(0.5f).epsilon(0.05));
+
+    const float loud = meter.level(0);
+    for (int i = 0; i < 200; ++i) {
+        meter.decay(0.01);
+    }
+
+    CHECK(meter.level(0) < loud * 0.1f);
+}
+
+TEST_CASE("Master meter separates mid and side")
+{
+    StereoBuffer buffer = MakeBuffer(480);
+    StereoBlock block = buffer.block(480);
+
+    FillSine(block, 1000.0, 0.5f);
+    MasterMeter mono;
+    for (int i = 0; i < 50; ++i) {
+        mono.update(block, 0.01);
+    }
+
+    CHECK(mono.mid().level() > 0.4f);
+    CHECK(mono.side().level() == doctest::Approx(0.0f));
+
+    for (uint32_t i = 0; i < block.frames(); ++i) {
+        block.right[i] = -block.left[i];
+    }
+
+    MasterMeter wide;
+    for (int i = 0; i < 50; ++i) {
+        wide.update(block, 0.01);
+    }
+
+    CHECK(wide.side().level() > 0.4f);
+    CHECK(wide.mid().level() == doctest::Approx(0.0f));
+}
+
+TEST_CASE("Routing sums master and cue onto a shared output channel")
+{
+    StereoBuffer masterBuffer = MakeBuffer(3);
+    StereoBuffer cueBuffer = MakeBuffer(3);
+    StereoBlock master = masterBuffer.block(3);
+    StereoBlock cue = cueBuffer.block(3);
+    for (uint32_t i = 0; i < 3; ++i) {
+        master.left[i] = 0.25f;
+        master.right[i] = 0.5f;
+        cue.left[i] = 0.125f;
+        cue.right[i] = 0.0625f;
+    }
+
+    RoutingMatrix matrix;
+    matrix[ROUTE_MASTER_L][0] = true;
+    matrix[ROUTE_CUE_L][0] = true;
+    matrix[ROUTE_CUE_R][1] = true;
+
+    std::vector<float> out(3 * 2, 99.0f);
+    RouteBuses(matrix, out.data(), 2, master, cue);
+    for (uint32_t i = 0; i < 3; ++i) {
+        CHECK(out[i * 2] == doctest::Approx(0.375f));
+        CHECK(out[i * 2 + 1] == doctest::Approx(0.0625f));
+    }
+
+    CHECK(RoutingMatrix::Identity().usesSource(ROUTE_CUE_R));
+    CHECK_FALSE(CueOnlyRouting().usesSource(ROUTE_MASTER_R));
 }

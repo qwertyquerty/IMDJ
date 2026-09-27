@@ -234,6 +234,37 @@ TEST_CASE("ReadBlock runs silent before the start unless asked to stop")
     CHECK(scratching.framesWritten == 0);
 }
 
+TEST_CASE("ReadBlock interpolates between frames and applies gain")
+{
+    SampleBuffer buffer = LoadedSine("interpolate.wav", 100.0, 0.5f, 1000);
+
+    StereoBuffer output;
+    output.resize(16);
+    StereoBlock block = output.block(16);
+
+    ReadBlock(buffer, block, {.startFrame = 10.5, .rate = 1.0, .gain = 2.0f});
+    const float expected = (buffer.frame(10)[0] + buffer.frame(11)[0]) * 0.5f * 2.0f;
+    CHECK(block.left[0] == doctest::Approx(expected));
+}
+
+TEST_CASE("ReadBlock follows the playback rate in both directions")
+{
+    SampleBuffer buffer = LoadedSine("rate.wav", 100.0, 0.5f, 1000);
+
+    StereoBuffer output;
+    output.resize(16);
+    StereoBlock block = output.block(16);
+
+    PlaybackResult doubled = ReadBlock(buffer, block, {.startFrame = 0.0, .rate = 2.0, .gain = 1.0f});
+    CHECK(block.left[3] == doctest::Approx(buffer.frame(6)[0]));
+    CHECK(doubled.endFrame == doctest::Approx(32.0));
+
+    PlaybackResult reversed = ReadBlock(buffer, block, {.startFrame = 100.0, .rate = -1.0, .gain = 1.0f});
+    CHECK(block.left[1] == doctest::Approx(buffer.frame(99)[0]));
+    CHECK(reversed.endFrame == doctest::Approx(84.0));
+    CHECK_FALSE(reversed.hitBoundary);
+}
+
 TEST_CASE("Track metadata round trips through its sidecar")
 {
     std::string path = TempFile("metadata.wav");
