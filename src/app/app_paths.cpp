@@ -115,9 +115,9 @@ void OpenFolderInFileManager(const std::string& path)
 #if defined(_WIN32)
     ShellExecuteA(nullptr, "open", path.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
 #elif defined(__APPLE__)
-    std::system(("open \"" + path + "\"").c_str());
+    [[maybe_unused]] const int status = std::system(("open \"" + path + "\"").c_str());
 #else
-    std::system(("xdg-open \"" + path + "\"").c_str());
+    [[maybe_unused]] const int status = std::system(("xdg-open \"" + path + "\"").c_str());
 #endif
 }
 

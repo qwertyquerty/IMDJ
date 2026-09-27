@@ -253,6 +253,8 @@ target_include_directories(vst3_hosting PUBLIC ${VST3_TREE_DIR})
 set_target_properties(vst3_hosting PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
 if(MSVC)
     target_compile_definitions(vst3_hosting PRIVATE _CRT_SECURE_NO_WARNINGS)
+else()
+    target_compile_options(vst3_hosting PRIVATE -w)
 endif()
 
 if(WIN32)
