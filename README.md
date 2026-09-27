@@ -19,7 +19,7 @@ On Linux, install the windowing, audio, and GL development packages first:
 
 ```
 sudo apt-get install ninja-build pkg-config libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev \
-    libxkbcommon-dev libwayland-dev wayland-protocols libgl1-mesa-dev libasound2-dev libjack-jackd2-dev
+    libxkbcommon-dev libwayland-dev wayland-protocols libgl1-mesa-dev libasound2-dev
 ```
 
 The app loads its fonts, languages, themes, and dancers from the folders next to its executable, falling back to the working directory. In development, the working directory should be set to `res/`.
