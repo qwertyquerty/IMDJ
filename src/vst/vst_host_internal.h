@@ -40,7 +40,9 @@ public:
 
 private:
     void* window_ = nullptr;
+#if defined(_WIN32)
     bool closeRequested_ = false;
+#endif
 };
 
 } // namespace imdj
