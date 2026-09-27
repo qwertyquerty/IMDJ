@@ -396,7 +396,8 @@ if(IMDJ_BUILD_TESTS)
     endif()
 
     set_target_properties(imdj_tests PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
-    add_test(NAME imdj_tests COMMAND imdj_tests)
+    include(${doctest_SOURCE_DIR}/scripts/cmake/doctest.cmake)
+    doctest_discover_tests(imdj_tests)
 endif()
 
 install(TARGETS imdj RUNTIME DESTINATION . COMPONENT app)
