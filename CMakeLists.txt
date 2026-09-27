@@ -240,6 +240,9 @@ if(WIN32)
     list(APPEND VST3_HOSTING_SOURCES ${vst3_public_sdk_SOURCE_DIR}/source/vst/hosting/module_win32.cpp)
 elseif(APPLE)
     list(APPEND VST3_HOSTING_SOURCES ${vst3_public_sdk_SOURCE_DIR}/source/vst/hosting/module_mac.mm)
+    set_source_files_properties(
+        ${vst3_public_sdk_SOURCE_DIR}/source/vst/hosting/module_mac.mm PROPERTIES COMPILE_OPTIONS -fobjc-arc
+    )
 else()
     list(APPEND VST3_HOSTING_SOURCES ${vst3_public_sdk_SOURCE_DIR}/source/vst/hosting/module_linux.cpp)
 endif()
