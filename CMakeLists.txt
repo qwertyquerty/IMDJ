@@ -20,6 +20,9 @@ endif()
 if(APPLE)
     enable_language(OBJC OBJCXX)
     add_compile_definitions(GL_SILENCE_DEPRECATION)
+    foreach(lang C CXX OBJC OBJCXX)
+        set(CMAKE_${lang}_ARCHIVE_FINISH "<CMAKE_RANLIB> -no_warning_for_no_symbols -c <TARGET>")
+    endforeach()
 endif()
 
 include(FetchContent)
@@ -325,7 +328,7 @@ add_executable(imdj
     src/vst/vst_scan.cpp
 )
 target_include_directories(imdj PRIVATE src)
-target_link_libraries(imdj PRIVATE imgui imgui_file_dialog miniaudio stb json bungee vst3_hosting rtmidi tag)
+target_link_libraries(imdj PRIVATE imgui_file_dialog miniaudio stb json bungee vst3_hosting rtmidi tag)
 
 if(UNIX AND NOT APPLE)
     find_package(Threads REQUIRED)
