@@ -1,0 +1,42 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Configure",
+            "type": "cmake",
+            "command": "configure",
+            "preset": "${command:cmake.activeConfigurePresetName}",
+            "problemMatcher": []
+        },
+        {
+            "label": "Build",
+            "type": "cmake",
+            "command": "build",
+            "preset": "${command:cmake.activeBuildPresetName}",
+            "group": { "kind": "build", "isDefault": true },
+            "problemMatcher": ["$msCompile", "$gcc"]
+        },
+        {
+            "label": "Test",
+            "type": "cmake",
+            "command": "test",
+            "preset": "${command:cmake.activeTestPresetName}",
+            "group": { "kind": "test", "isDefault": true },
+            "problemMatcher": []
+        },
+        {
+            "label": "Format",
+            "type": "shell",
+            "command": "python",
+            "args": ["scripts/format.py"],
+            "problemMatcher": []
+        },
+        {
+            "label": "Check format",
+            "type": "shell",
+            "command": "python",
+            "args": ["scripts/format.py", "--check"],
+            "problemMatcher": []
+        }
+    ]
+}

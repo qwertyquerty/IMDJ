@@ -1,0 +1,9 @@
+build/
+.cache/
+.vs/
+*.user
+CMakeUserPresets.json
+songs
+__pycache__
+notes
+unused

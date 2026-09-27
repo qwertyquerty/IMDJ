@@ -1,0 +1,125 @@
+name: build
+
+on:
+  push:
+    branches: [master, main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  format:
+    name: clang-format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install clang-format
+        run: pip install -r requirements.txt
+
+      - name: Check formatting
+        run: python scripts/format.py --check
+
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: windows-x64
+            os: windows-latest
+            preset: windows-release
+          - name: linux-x64
+            os: ubuntu-latest
+            preset: linux-release
+          - name: linux-arm64
+            os: ubuntu-24.04-arm
+            preset: linux-release
+          - name: macos-arm64
+            os: macos-14
+            preset: macos-release
+          - name: macos-x64
+            os: macos-15-intel
+            preset: macos-release
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            ninja-build pkg-config \
+            libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev \
+            libxkbcommon-dev libwayland-dev wayland-protocols \
+            libgl1-mesa-dev libasound2-dev libjack-jackd2-dev
+
+      - name: Install macOS dependencies
+        if: runner.os == 'macOS'
+        run: brew install ninja
+
+      - name: Set up MSVC
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Install Ninja on Windows
+        if: runner.os == 'Windows'
+        run: choco install ninja --no-progress -y
+
+      - name: Cache fetched dependencies
+        uses: actions/cache@v4
+        with:
+          path: build/${{ matrix.preset }}/_deps
+          key: deps-${{ matrix.name }}-${{ hashFiles('CMakeLists.txt') }}
+          restore-keys: deps-${{ matrix.name }}-
+
+      - name: Configure
+        run: cmake --preset ${{ matrix.preset }}
+
+      - name: Build
+        run: cmake --build --preset ${{ matrix.preset }} --parallel
+
+      - name: Test
+        run: ctest --preset ${{ matrix.preset }}
+
+      - name: Package
+        shell: bash
+        run: |
+          version="$GITHUB_REF_NAME"
+          [[ "$GITHUB_REF" == refs/tags/* ]] || version="dev-${GITHUB_SHA::7}"
+          package=build/${{ matrix.preset }}/package
+          cpack --config build/${{ matrix.preset }}/CPackConfig.cmake -B "$package" -D CPACK_PACKAGE_FILE_NAME="IMDJ-$version"
+          mv "$package/IMDJ-$version.zip" "$package/IMDJ-$version-${{ matrix.name }}.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: imdj-${{ matrix.name }}
+          path: build/${{ matrix.preset }}/package/IMDJ-*-${{ matrix.name }}.zip
+          if-no-files-found: error
+
+  release:
+    name: publish release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [format, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          flags=(--repo "$GITHUB_REPOSITORY" --title "$TAG" --generate-notes)
+          case "$TAG" in *-*) flags+=(--prerelease) ;; esac
+          gh release create "$TAG" "${flags[@]}" artifacts/*/*.zip

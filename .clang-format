@@ -1,0 +1,31 @@
+---
+BasedOnStyle: Google
+Standard: c++20
+
+ColumnLimit: 120
+AlignAfterOpenBracket: BlockIndent
+BinPackArguments: false
+IndentWidth: 4
+AccessModifierOffset: -4
+NamespaceIndentation: None
+
+PointerAlignment: Left
+ReferenceAlignment: Left
+DerivePointerAlignment: false
+
+AllowShortCaseLabelsOnASingleLine: true
+AllowShortFunctionsOnASingleLine: All
+AllowShortIfStatementsOnASingleLine: WithoutElse
+AllowShortLoopsOnASingleLine: true
+BreakBeforeBraces: Stroustrup
+Cpp11BracedListStyle: true
+KeepEmptyLinesAtTheStartOfBlocks: false
+SpacesBeforeTrailingComments: 1
+
+IncludeBlocks: Preserve
+SortIncludes: Never
+
+InsertBraces: true
+---
+Language: Cpp
+...

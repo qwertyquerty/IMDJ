@@ -1,0 +1,23 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Debug imdj (MSVC)",
+            "type": "cppvsdbg",
+            "request": "launch",
+            "program": "${command:cmake.launchTargetPath}",
+            "cwd": "${workspaceFolder}/res",
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "Debug imdj (gdb / lldb)",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${command:cmake.launchTargetPath}",
+            "cwd": "${workspaceFolder}/res",
+            "externalConsole": false,
+            "linux": { "MIMode": "gdb" },
+            "osx": { "MIMode": "lldb" }
+        }
+    ]
+}
