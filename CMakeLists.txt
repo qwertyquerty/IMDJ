@@ -19,6 +19,7 @@ endif()
 
 if(APPLE)
     enable_language(OBJC OBJCXX)
+    add_compile_definitions(GL_SILENCE_DEPRECATION)
 endif()
 
 include(FetchContent)
