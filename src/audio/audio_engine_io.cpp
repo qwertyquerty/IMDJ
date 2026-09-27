@@ -1,4 +1,8 @@
 #include "audio/audio_engine.h"
+
+#include <mutex>
+#include <utility>
+
 #include "core/strings.h"
 
 namespace imdj {
@@ -57,9 +61,12 @@ void AudioEngine::installLoadedTrack(TrackLoader::Loaded& loaded)
     deck->cancelScratch();
     deck->playing.store(false);
     deck->clearLoop();
+    {
+        std::lock_guard lock(deck->renderMutex);
+        std::swap(deck->buffer, loaded.buffer);
+        deck->dsp.chain.reset();
+    }
 
-    deck->retiredBuffer = std::move(deck->buffer);
-    deck->buffer = std::move(loaded.buffer);
     deck->peaks = std::move(loaded.peaks);
     deck->filePath = loaded.path;
     deck->fileName = FileNameOf(loaded.path);
@@ -69,7 +76,6 @@ void AudioEngine::installLoadedTrack(TrackLoader::Loaded& loaded)
     deck->bpm.store(120.0);
     deck->normalizeGain.store(loaded.normalizeGain);
     deck->normalizeEnabled.store(true);
-    deck->dsp.chain.reset();
 
     deck->applyMetadata(loaded.hasMetadata ? loaded.metadata : TrackMetadata{});
     deck->saved = deck->metadata();

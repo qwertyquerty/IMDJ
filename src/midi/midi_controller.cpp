@@ -263,8 +263,12 @@ VstChain* MidiController::chainForTarget(FxChainTarget target) const
         return nullptr;
     }
 
-    return target == FxChainTarget::Master ? &engine_->masterVstChain()
-                                           : &engine_->deck(FxChainTargetDeck(target)).vstChain;
+    if (target == FxChainTarget::Master) {
+        return &engine_->masterVstChain();
+    }
+
+    const int deck = FxChainTargetDeck(target);
+    return engine_->validDeck(deck) ? &engine_->deck(deck).vstChain : nullptr;
 }
 
 void MidiController::releaseScratch(int deckIndex)
@@ -360,9 +364,10 @@ void MidiController::applyFxKnob(int deckIndex, int knobIndex, float value)
     const float bipolar = value * 2.0f - 1.0f;
     switch (assignment.targetKind) {
         case KnobTargetKind::VstParam: {
-            VstChain* chain = chainForTarget(assignment.chain);
-            if (chain && assignment.pluginIndex < chain->size()) {
-                chain->at(assignment.pluginIndex).setParameterNormalized(assignment.paramId, value);
+            if (VstChain* chain = chainForTarget(assignment.chain)) {
+                chain->withPlugin(assignment.pluginIndex, [&](VstPluginInstance& plugin) {
+                    plugin.setParameterNormalized(assignment.paramId, value);
+                });
             }
 
             return;
@@ -385,15 +390,17 @@ void MidiController::applyPad(int deckIndex, int padIndex)
 
     switch (action.kind) {
         case PadActionKind::TogglePluginBypass: {
-            VstChain* chain = chainForTarget(action.chain);
-            if (chain && action.pluginIndex < chain->size()) {
-                VstPluginInstance& plugin = chain->at(action.pluginIndex);
-                plugin.setBypassed(!plugin.bypassed());
+            if (VstChain* chain = chainForTarget(action.chain)) {
+                chain->withPlugin(action.pluginIndex, [](VstPluginInstance& plugin) {
+                    plugin.setBypassed(!plugin.bypassed());
+                });
             }
 
             return;
         }
-        case PadActionKind::JumpToMarker: engine_->deck(deckIndex).jumpToMarker(action.markerIndex); return;
+        case PadActionKind::JumpToMarker:
+            engine_->deck(deckIndex).pendingMarkerJump.store(static_cast<int>(action.markerIndex));
+            return;
         case PadActionKind::None: return;
     }
 }
@@ -405,13 +412,10 @@ void MidiController::dispatch(MidiControl control, uint8_t statusHighNibble, uin
     }
 
     const ControlInfo& info = ControlInfoFor(control);
+    const bool cc = statusHighNibble == 0xB0;
+    const bool noteOn = statusHighNibble == 0x90 && data2 > 0;
     const ControlEvent event{
-        info.deckIndex,
-        info.slot,
-        statusHighNibble == 0x90 && data2 > 0,
-        statusHighNibble == 0xB0,
-        data2 / 127.0f,
-        data2
+        info.deckIndex, info.slot, noteOn || (cc && data2 >= 64), cc ? data2 < 64 : !noteOn, cc, data2 / 127.0f, data2
     };
     apply(info.action, event);
 }
@@ -420,14 +424,18 @@ void MidiController::apply(ActionKind action, const ControlEvent& event)
 {
     AudioEngine& engine = *engine_;
     const int index = event.deckIndex;
-    Deck& deck = engine.deck(index);
+    if (index >= 0 && !engine.validDeck(index)) {
+        return;
+    }
+
+    Deck& deck = engine.deck(std::max(index, 0));
 
     switch (action) {
         case ActionKind::Cue:
             if (event.pressed) {
                 deck.cuePress();
             }
-            else if (!event.continuous) {
+            else if (event.released) {
                 deck.cueRelease();
             }
 
@@ -443,6 +451,7 @@ void MidiController::apply(ActionKind action, const ControlEvent& event)
                 );
                 if (target) {
                     deck.setScratchTarget(*target);
+                    jogScratching_[index].store(true);
                 }
             }
 
@@ -452,15 +461,13 @@ void MidiController::apply(ActionKind action, const ControlEvent& event)
 
     if (event.continuous) {
         switch (action) {
-            case ActionKind::Volume: deck.setVolume(event.value); break;
-            case ActionKind::Gain: deck.setGain(event.value * 2.0f); break;
-            case ActionKind::Tempo: deck.setPlaybackRate(TempoFaderToRate(event.raw)); break;
-            case ActionKind::Crossfader: engine.setCrossfade(event.value); break;
-            case ActionKind::FxKnob: applyFxKnob(index, event.slot, event.value); break;
+            case ActionKind::Volume: deck.setVolume(event.value); return;
+            case ActionKind::Gain: deck.setGain(event.value * 2.0f); return;
+            case ActionKind::Tempo: deck.setPlaybackRate(TempoFaderToRate(event.raw)); return;
+            case ActionKind::Crossfader: engine.setCrossfade(event.value); return;
+            case ActionKind::FxKnob: applyFxKnob(index, event.slot, event.value); return;
             default: break;
         }
-
-        return;
     }
 
     if (!event.pressed) {
@@ -482,7 +489,12 @@ void MidiController::apply(ActionKind action, const ControlEvent& event)
         case ActionKind::LoopOut: deck.setLoopOutHere(); break;
         case ActionKind::LoopToggle: deck.setLoopEnabled(!deck.loopEnabled.load()); break;
         case ActionKind::Pad: applyPad(index, event.slot); break;
-        case ActionKind::MonitorToggle: engine.deck(event.slot).toggleCue(); break;
+        case ActionKind::MonitorToggle:
+            if (engine.validDeck(event.slot)) {
+                engine.deck(event.slot).toggleCue();
+            }
+
+            break;
         case ActionKind::MonitorToggleMaster: engine.setCueMaster(!engine.cueMaster()); break;
         default: break;
     }
@@ -494,10 +506,13 @@ void MidiController::update()
         return;
     }
 
-    double now = NowSeconds();
+    const double now = NowSeconds();
     for (int deck = 0; deck < MAX_DECK_COUNT; ++deck) {
-        if (engine_->deck(deck).scratching.load() && jog_[deck].idle(now)) {
-            releaseScratch(deck);
+        if (jogScratching_[deck].load() && jog_[deck].idle(now)) {
+            jogScratching_[deck].store(false);
+            if (engine_->validDeck(deck) && engine_->deck(deck).scratching.load()) {
+                releaseScratch(deck);
+            }
         }
     }
 }

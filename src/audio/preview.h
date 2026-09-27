@@ -1,6 +1,7 @@
 #pragma once
 
 #include <atomic>
+#include <mutex>
 #include <string>
 
 #include "audio/audio_buffer.h"
@@ -33,7 +34,7 @@ private:
     static constexpr int SLOT = 0;
 
     SampleBuffer buffer_;
-    SampleBuffer retiredBuffer_;
+    std::mutex bufferMutex_;
     StereoBuffer scratch_;
     TrackLoader loader_;
     std::string path_;

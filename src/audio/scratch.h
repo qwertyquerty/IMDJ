@@ -1,6 +1,7 @@
 #pragma once
 
 #include <chrono>
+#include <mutex>
 
 namespace imdj {
 
@@ -8,6 +9,7 @@ class ScratchTracker {
 public:
     double setTarget(double targetFrame)
     {
+        std::lock_guard lock(mutex_);
         const auto now = Clock::now();
         if (hasPrev_) {
             double dt = std::chrono::duration<double>(now - prevTime_).count();
@@ -31,6 +33,7 @@ public:
 
     double end()
     {
+        std::lock_guard lock(mutex_);
         double rate = smoothed_;
         if (hasPrev_) {
             double idle = std::chrono::duration<double>(Clock::now() - prevTime_).count();
@@ -45,12 +48,17 @@ public:
 
     void reset()
     {
+        std::lock_guard lock(mutex_);
         hasPrev_ = false;
         initialized_ = false;
         smoothed_ = 0.0;
     }
 
-    double velocity() const { return smoothed_; }
+    double velocity() const
+    {
+        std::lock_guard lock(mutex_);
+        return smoothed_;
+    }
 
 private:
     using Clock = std::chrono::steady_clock;
@@ -59,6 +67,7 @@ private:
     static constexpr double MIN_DELTA_SEC = 0.001;
     static constexpr double STALE_AFTER_SEC = 0.03;
 
+    mutable std::mutex mutex_;
     double prevTarget_ = 0.0;
     double smoothed_ = 0.0;
     Clock::time_point prevTime_{};

@@ -233,6 +233,10 @@ void AudioEngine::update(double nowSeconds)
     }
 
     for (Deck& deck : decks()) {
+        if (const int marker = deck.pendingMarkerJump.exchange(-1); marker >= 0) {
+            deck.jumpToMarker(static_cast<size_t>(marker));
+        }
+
         if (deck.tempoRamp.active()) {
             deck.setPlaybackRate(static_cast<float>(deck.tempoRamp.update(nowSeconds)));
         }

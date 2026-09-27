@@ -1,6 +1,8 @@
 #include "audio/preview.h"
 
 #include <algorithm>
+#include <mutex>
+#include <utility>
 
 #include "audio/audio_constants.h"
 #include "audio/sample_player.h"
@@ -37,8 +39,11 @@ void Preview::poll()
         }
 
         playing_.store(false);
-        retiredBuffer_ = std::move(buffer_);
-        buffer_ = std::move(loaded.buffer);
+        {
+            std::lock_guard lock(bufferMutex_);
+            std::swap(buffer_, loaded.buffer);
+        }
+
         path_ = loaded.path;
         pendingPath_.clear();
         frame_.store(0.0);
@@ -58,7 +63,8 @@ void Preview::setVolume(float volume) { volume_.store(std::clamp(volume, 0.0f, 1
 
 void Preview::mixInto(const StereoBlock& cue)
 {
-    if (!playing_.load() || !cue.valid()) {
+    const std::unique_lock lock(bufferMutex_, std::try_to_lock);
+    if (!lock || !playing_.load() || !cue.valid()) {
         return;
     }
 

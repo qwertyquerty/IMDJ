@@ -43,16 +43,17 @@ void AudioEngine::primaryDataCallback(ma_device* device, void* output, const voi
 {
     auto* engine = static_cast<AudioEngine*>(device->pUserData);
     const uint32_t channels = device->playback.channels;
-    const uint32_t rendered = engine->renderBlock(frameCount);
-
     float* out = static_cast<float*>(output);
-    RouteBuses(
-        engine->primaryRouting_, out, channels, engine->masterBus_.block(rendered), engine->cueBus_.block(rendered)
-    );
-    if (rendered < frameCount) {
-        std::fill(
-            out + static_cast<size_t>(rendered) * channels, out + static_cast<size_t>(frameCount) * channels, 0.0f
+    for (uint32_t done = 0; done < frameCount;) {
+        const uint32_t rendered = engine->renderBlock(frameCount - done);
+        RouteBuses(
+            engine->primaryRouting_,
+            out + static_cast<size_t>(done) * channels,
+            channels,
+            engine->masterBus_.block(rendered),
+            engine->cueBus_.block(rendered)
         );
+        done += rendered;
     }
 }
 
@@ -119,9 +120,10 @@ void AudioEngine::renderDeck(Deck& deck, const StereoBlock& master, float crossf
     StereoBlock block = deck.dsp.buffer.block(master.frames());
     const double blockSeconds = static_cast<double>(master.frames()) / SAMPLE_RATE;
 
+    const std::unique_lock lock(deck.renderMutex, std::try_to_lock);
     const bool scratching = deck.scratching.load();
     const bool spinning = deck.spinbackActive.load();
-    if ((!deck.playing.load() && !scratching) || !deck.hasTrack()) {
+    if (!lock || (!deck.playing.load() && !scratching) || !deck.hasTrack()) {
         block.clear();
         deck.dsp.meter.decay(blockSeconds);
 

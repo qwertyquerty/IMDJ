@@ -445,12 +445,12 @@ int main()
             app.pendingLanguage.clear();
         }
 
+        app.engine.update(app.shell.time());
+        app.midi.update();
         if (!app.shell.beginFrame()) {
             continue;
         }
 
-        app.engine.update(app.shell.time());
-        app.midi.update();
         for (int i = 0; i < app.engine.deckCount(); ++i) {
             app.engine.deck(i).vstChain.pumpEditors();
         }

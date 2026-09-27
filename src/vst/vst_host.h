@@ -5,6 +5,7 @@
 #include <future>
 #include <memory>
 #include <mutex>
+#include <shared_mutex>
 #include <string>
 #include <thread>
 #include <vector>
@@ -82,6 +83,15 @@ public:
     void process(float* left, float* right, int32_t numFrames, const VstTransportInfo& transport);
     void pumpEditors();
 
+    template <typename Fn>
+    void withPlugin(size_t index, Fn fn)
+    {
+        std::shared_lock lock(mutex_);
+        if (index < plugins_.size()) {
+            fn(*plugins_[index]);
+        }
+    }
+
 private:
     struct Teardown {
         std::thread thread;
@@ -92,7 +102,7 @@ private:
 
     std::vector<std::unique_ptr<VstPluginInstance>> plugins_;
     std::vector<Teardown> teardowns_;
-    mutable std::mutex mutex_;
+    mutable std::shared_mutex mutex_;
 };
 
 } // namespace imdj

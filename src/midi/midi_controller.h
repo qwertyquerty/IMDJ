@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <atomic>
 #include <cstdint>
 #include <memory>
 #include <mutex>
@@ -81,6 +82,7 @@ private:
         int deckIndex = 0;
         int slot = -1;
         bool pressed = false;
+        bool released = false;
         bool continuous = false;
         float value = 0.0f;
         uint8_t raw = 0;
@@ -106,6 +108,7 @@ private:
     LastMessage lastMessage_;
 
     JogTracker jog_[MAX_DECK_COUNT];
+    std::atomic<bool> jogScratching_[MAX_DECK_COUNT];
 };
 
 } // namespace imdj

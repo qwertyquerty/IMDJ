@@ -6,7 +6,7 @@ namespace imdj {
 
 void VstChain::add(std::unique_ptr<VstPluginInstance> plugin)
 {
-    std::lock_guard lock(mutex_);
+    std::unique_lock lock(mutex_);
     plugins_.push_back(std::move(plugin));
 }
 
@@ -22,7 +22,6 @@ void VstChain::retire(std::unique_ptr<VstPluginInstance> plugin)
         done.set_value();
     });
 
-    std::lock_guard lock(mutex_);
     teardowns_.push_back(std::move(teardown));
 }
 
@@ -30,7 +29,7 @@ void VstChain::removeAt(size_t index)
 {
     std::unique_ptr<VstPluginInstance> removed;
     {
-        std::lock_guard lock(mutex_);
+        std::unique_lock lock(mutex_);
         if (index >= plugins_.size()) {
             return;
         }
@@ -44,7 +43,7 @@ void VstChain::removeAt(size_t index)
 
 void VstChain::moveUp(size_t index)
 {
-    std::lock_guard lock(mutex_);
+    std::unique_lock lock(mutex_);
     if (index > 0 && index < plugins_.size()) {
         std::swap(plugins_[index - 1], plugins_[index]);
     }
@@ -52,7 +51,7 @@ void VstChain::moveUp(size_t index)
 
 void VstChain::moveDown(size_t index)
 {
-    std::lock_guard lock(mutex_);
+    std::unique_lock lock(mutex_);
     if (index + 1 < plugins_.size()) {
         std::swap(plugins_[index], plugins_[index + 1]);
     }
@@ -62,7 +61,7 @@ void VstChain::clear()
 {
     std::vector<std::unique_ptr<VstPluginInstance>> removed;
     {
-        std::lock_guard lock(mutex_);
+        std::unique_lock lock(mutex_);
         removed.swap(plugins_);
     }
 
@@ -71,10 +70,7 @@ void VstChain::clear()
     }
 
     std::vector<Teardown> teardowns;
-    {
-        std::lock_guard lock(mutex_);
-        teardowns.swap(teardowns_);
-    }
+    teardowns.swap(teardowns_);
 
     for (Teardown& teardown : teardowns) {
         if (teardown.finished.wait_for(std::chrono::seconds(5)) == std::future_status::ready) {
@@ -88,7 +84,7 @@ void VstChain::clear()
 
 void VstChain::process(float* left, float* right, int32_t numFrames, const VstTransportInfo& transport)
 {
-    std::unique_lock lock(mutex_, std::try_to_lock);
+    std::shared_lock lock(mutex_, std::try_to_lock);
     if (!lock) {
         return;
     }
@@ -100,9 +96,11 @@ void VstChain::process(float* left, float* right, int32_t numFrames, const VstTr
 
 void VstChain::pumpEditors()
 {
-    std::lock_guard lock(mutex_);
-    for (std::unique_ptr<VstPluginInstance>& plugin : plugins_) {
-        plugin->pumpEditor();
+    {
+        std::shared_lock lock(mutex_);
+        for (std::unique_ptr<VstPluginInstance>& plugin : plugins_) {
+            plugin->pumpEditor();
+        }
     }
 
     std::erase_if(teardowns_, [](Teardown& teardown) {

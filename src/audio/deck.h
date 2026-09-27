@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -26,7 +27,8 @@ namespace imdj {
 
 struct Deck {
     SampleBuffer buffer;
-    SampleBuffer retiredBuffer;
+    // The audio thread only try-locks this; the UI holds it while swapping the loaded track.
+    std::mutex renderMutex;
     WaveformPeaks peaks;
     std::string filePath;
     std::string fileName;
@@ -73,6 +75,7 @@ struct Deck {
     std::atomic<int> crossfaderSide{static_cast<int>(CrossfaderSide::None)};
 
     std::atomic<bool> scratching{false};
+    std::atomic<int> pendingMarkerJump{-1};
     std::atomic<double> scratchTargetFrame{0.0};
     std::atomic<double> scratchVelocity{0.0};
 
